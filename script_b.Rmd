@@ -1,0 +1,222 @@
+---
+title: "Tidymodels packages in R"
+author: "Bilikisu W. Aderinto"
+date: "11/24/2020"
+output: 
+    html_document: 
+      toc: true
+      toc_depth: 2
+      toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Tidymodels packages in R
+
+The tidymodels framework is **a collection of packages** for **modeling and machine learning** using [tidyverse](https://www.tidyverse.com) principles. [Tidymodels, 2020](https://www.tidymodels.org)
+
+```{r}
+library(tidymodels)
+```
+
+
+```{r, warning=FALSE, error=FALSE, message=FALSE}
+library(tidyverse)
+library(themis)
+library(knitr)
+library(skimr)
+
+#library(ranger)
+#library(randomForest)
+```
+
+## Read Data into workspace
+
+```{r, warning=FALSE, error=FALSE, message=FALSE}
+bankmarketing_data <- read_csv("bankmarketing_train.csv")
+```
+
+```{r}
+glimpse(bankmarketing_data)
+```
+
+## Data Summary
+
+```{r, results='hide'}
+skim(bankmarketing_data)
+```
+
+
+## Data Cleaning and Data manipulation
+
+```{r}
+bankmarketing_cleaned <- bankmarketing_data %>% 
+  mutate_if(is.character, factor) 
+
+glimpse(bankmarketing_cleaned)
+```
+
+
+## Modeling
+
+### rsample package - Data Sampling
+
+1. split dataset
+`initial_split()` creates a single binary split of the data into a training set and testing set.
+```{r}
+set.seed(923)
+bankmarketing_split <- initial_split(bankmarketing_cleaned, strata = y)
+
+#bankmarketing_split <- initial_split(bankmarketing_cleaned, prop = 0.7)
+
+bankmarketing_split
+```
+
+2. get the training and testing data
+
+`training()` and `testing()` are used to extract the resulting data.
+```{r}
+bankmarketing_train <- training(bankmarketing_split)
+```
+
+```{r}
+bankmarketing_train %>% 
+  count(y)
+```
+
+
+```{r}
+bankmarketing_test <- testing(bankmarketing_split)
+```
+
+```{r}
+bankmarketing_test %>% 
+  count(y)
+```
+
+
+```{r}
+set.seed(123)
+bm_boot <- bootstraps(bankmarketing_train)
+bm_boot
+```
+
+
+```{r}
+ranger_spec <- rand_forest() %>%
+  set_mode("classification") %>%
+  set_engine("ranger")
+
+ranger_spec
+```
+
+
+```{r}
+rf_spec <- rand_forest() %>%
+  set_mode("classification") %>%
+  set_engine("randomForest")
+
+rf_spec
+```
+
+
+```{r}
+bm_workflow <- workflow() %>%
+  add_formula(y ~ .)
+
+bm_workflow
+```
+
+
+```{r}
+ranger_results <- bm_workflow %>%
+  add_model(ranger_spec) %>%
+  fit_resamples(
+    resamples = bm_boot,
+    control = control_resamples(save_pred = TRUE)
+  )
+
+ranger_results
+```
+
+
+```{r}
+rf_results <- bm_workflow %>%
+  add_model(rf_spec) %>%
+  fit_resamples(
+    resamples = bm_boot,
+    control = control_resamples(save_pred = TRUE)
+  )
+
+rf_results
+```
+
+
+### Evaluate Models
+Now let’s check out performance of each model using the `tune` package.
+
+```{r}
+
+collect_metrics(rf_results)
+```
+
+
+```{r}
+collect_metrics(ranger_results) # tune package
+```
+
+
+```{r}
+ranger_results %>%
+  conf_mat_resampled() # tune package
+```
+
+
+```{r}
+rf_results %>% 
+  conf_mat_resampled() # tune package
+```
+
+
+```{r}
+# collect predictions for the ranger model
+ranger_results %>% 
+  collect_predictions() # tune package
+```
+
+
+
+```{r}
+ranger_results %>%
+  collect_predictions() %>%
+  group_by(id) %>% # to get out 25 ROC curves
+  roc_curve(y, .pred_yes) %>%
+  #autoplot() %>% # tune package
+  ggplot(aes(1 - specificity, sensitivity, color = id)) +
+  geom_abline(lty = 2, color = "gray80", size = 1.5) +
+  geom_path(show.legend = FALSE, alpha = 0.6, size = 1.2) +
+  coord_equal()
+
+
+```
+
+
+```{r}
+bm_final <- bm_workflow %>%
+  add_model(ranger_spec) %>%
+  last_fit(bankmarketing_split)
+
+bm_final
+```
+
+```{r}
+collect_metrics(bm_final)
+```
+
+```{r}
+collect_predictions(bm_final) %>%
+  conf_mat(y, .pred_class)
+```
+

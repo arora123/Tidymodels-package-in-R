@@ -1,0 +1,257 @@
+---
+title: "Tidymodels packages in R"
+author: "Bilikisu W. Aderinto"
+date: "11/24/2020"
+output: 
+    html_document: 
+      toc: true
+      toc_depth: 2
+      toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Tidymodels packages in R
+
+The tidymodels framework is **a collection of packages** for **modeling and machine learning** using [tidyverse](https://www.tidyverse.com) principles. [Tidymodels, 2020](https://www.tidymodels.org)
+
+```{r}
+
+library(tidymodels)
+```
+
+```{r, warning=FALSE, error=FALSE, message=FALSE}
+library(tidyverse)
+library(themis)
+library(knitr)
+library(skimr)
+
+#library(ranger)
+#library(randomForest)
+```
+
+## Read Data into workspace
+
+```{r, warning=FALSE, error=FALSE, message=FALSE}
+bankmarketing_data <- read_csv("bankmarketing_train.csv")
+```
+
+```{r}
+glimpse(bankmarketing_data)
+```
+
+## Data Summary
+
+```{r, results='hide'}
+skim(bankmarketing_data)
+```
+
+
+## Data Cleaning and Data manipulation
+
+```{r}
+bankmarketing_cleaned <- bankmarketing_data %>% 
+  mutate_if(is.character, factor) 
+
+
+glimpse(bankmarketing_cleaned)
+```
+
+
+## Visualization
+
+```{r}
+# Imbalanced data
+
+bankmarketing_cleaned %>% 
+  count(y) %>% 
+  ggplot(aes(y=n,x=y))+
+  geom_bar(aes(fill=y),stat="identity")+ 
+  guides(fill=FALSE)+
+  labs(title = "Proportion of Customers who subscribed vs not subscribed",
+         x = "Subscribed",
+         y = "Number of Customers")
+```
+
+
+```{r}
+bankmarketing_cleaned %>% 
+  count(campaign,y) %>% 
+  ggplot(aes(y=n,x=campaign, fill = y))+
+  geom_bar(stat = "identity")+
+  theme(legend.title=element_blank())+
+  labs(title = "Proportion of Customers who subscribed vs not subscribed Per each Campaign",
+         x = "Campaign",
+         y = "Number of Customers")
+
+```
+
+```{r}
+bankmarketing_cleaned %>% 
+    count(day_of_week,y) %>% 
+    ggplot(aes(y=n,x=day_of_week, fill = y))+
+    geom_bar(stat = "identity")+ theme(legend.title=element_blank())
+
+```
+
+
+
+## Modeling
+
+### rsample package - Data Sampling
+
+1. split dataset
+`initial_split()` creates a single binary split of the data into a training set and testing set.
+```{r}
+set.seed(923)
+bankmarketing_split <- initial_split(bankmarketing_cleaned, strata = y)
+
+#bankmarketing_split <- initial_split(bankmarketing_cleaned, prop = 0.7)
+
+bankmarketing_split
+```
+
+2. get the training and testing data
+
+`training()` and `testing()` are used to extract the resulting data.
+```{r}
+bankmarketing_train <- training(bankmarketing_split)
+```
+
+```{r}
+bankmarketing_train %>% 
+  count(y)
+```
+
+
+```{r}
+bankmarketing_test <- testing(bankmarketing_split)
+```
+
+```{r}
+bankmarketing_test %>% 
+  count(y)
+```
+
+
+### recipes package - Data Preprocessing
+
+`recipe()` is used to starts a new set of transformations to be applied, similar to the ggplot() command. Its main argument is the model’s formula.
+
+`bake()` takes a trained recipe and applies the operations to a dataset to create a design matrix.
+
+`prep()` - Executes the transformations on top of the data that is supplied (typically, the training data).
+```{r}
+bankmarketing_recipe <- bankmarketing_train %>% 
+  recipe(y ~.) %>%
+  step_corr(all_numeric()) %>%
+  step_normalize(all_numeric()) %>% 
+  step_dummy(all_nominal(),-y) %>% 
+  step_smote(y)
+
+bankmarketing_recipe
+```
+
+
+```{r}
+
+bankmarketing_train_prepped <- bankmarketing_recipe %>% 
+  prep() # recipe now applied to train data
+  
+bankmarketing_train_prepped <- bankmarketing_train_prepped %>% 
+  bake(new_data = NULL)
+
+bankmarketing_train_prepped
+```
+A look at the effect of `step_smote()` in handling class imbalance i.e. y variable 
+
+```{r}
+bankmarketing_train_prepped %>% 
+  count(y)
+```
+
+
+### parsnip package - selecting model
+
+This package provides functions and methods to create and manipulate functions commonly used during modeling (e.g. fitting the model, making predictions, etc). It allows the user to manipulate how the same type of model can be created from different sources. It also contains a basic framework for model parameter tuning. [parsnip intro](https://parsnip.tidymodels.org/articles/parsnip_Intro.html)
+
+We are selecting a Random Forest Models
+Computational engine: - randomForest, ranger
+
+### Model training
+
+```{r}
+# generate a fitted model on the prepped train data
+bm_ranger <- rand_forest(trees = 1000, mode = "classification") %>%
+  set_engine("ranger") %>%
+  fit(y ~ ., data = bankmarketing_train_prepped)
+```
+
+
+```{r}
+
+bm_rf <-  rand_forest(trees = 1000, mode = "classification") %>%
+  set_engine("randomForest") %>%
+  fit(y ~ ., data = bankmarketing_train_prepped)
+```
+
+
+### Predictions
+Prepping the testing data
+```{r}
+bankmarketing_test_prepped <- bake(prep(bankmarketing_recipe), new_data = bankmarketing_test)
+
+bankmarketing_test_prepped
+```
+
+
+```{r}
+predict(bm_ranger, bankmarketing_test_prepped) # tune package
+```
+
+
+```{r}
+bm_ranger %>%
+  predict(bankmarketing_test_prepped) %>%
+  bind_cols(bankmarketing_test_prepped$y) %>%
+  glimpse()
+```
+
+
+```{r}
+predict(bm_rf, bankmarketing_test_prepped)
+```
+
+
+```{r}
+bm_rf %>%
+  predict(bankmarketing_test_prepped) %>%
+  bind_cols(bankmarketing_test_prepped$y) %>%
+  glimpse()
+```
+
+
+### Model Validation
+```{r}
+bm_ranger %>%
+  predict(bankmarketing_test_prepped) %>%
+  bind_cols(bankmarketing_test_prepped) %>%
+  metrics(truth = y, estimate = .pred_class)
+```
+
+
+```{r}
+bm_rf %>%
+  predict(bankmarketing_test_prepped) %>%
+  bind_cols(bankmarketing_test_prepped) %>%
+  metrics(truth = y, estimate = .pred_class)
+```
+
+
+
+
+```{r}
+
+```
