@@ -1,2 +1,2 @@
-# intro-to-tidymodels
-RLadies event
+# Tidymodels package in R
+RLadies Tunis event
